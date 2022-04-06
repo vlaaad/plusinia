@@ -1,0 +1,204 @@
+(ns io.github.vlaaad.plusinia-test
+  (:require [io.github.vlaaad.plusinia :as p]
+            [com.walmartlabs.lacinia :as l]
+            [clojure.test :refer :all]
+            [com.walmartlabs.lacinia.schema :as l.schema]))
+
+(def ^:private ^:dynamic *invocations*)
+
+(defn- wrap-count-invocations [f]
+  (fn [& args]
+    (swap! *invocations* conj (into [f] args))
+    (apply f args)))
+
+(defmacro with-invocation-counter [& body]
+  `(binding [*invocations* (atom #{})]
+     (let [result# (do ~@body)
+           invocations# @*invocations*]
+       {:result result#
+        :invocations invocations#})))
+
+(defn- fetch-2-concepts [ctx args]
+  [1 2])
+
+(defn- fetch-identity [ctx args values]
+  (zipmap values values))
+
+(defn- fetch-identity-or-theify [ctx {:keys [theify]} values]
+  (zipmap values (if theify
+                   (map #(str "the " %) values)
+                   values)))
+
+(defn- fetch-related [ctx args values]
+  (zipmap values
+          (map #(-> % inc (p/make-node :context {:related true}) vector) values)))
+
+(defn- fetch-broader [ctx args values]
+  (zipmap values
+          (map #(-> % dec (p/make-node :context {:broader true}) vector) values)))
+
+(deftest plusinia-batches-requests
+  (testing "across fields"
+    (let [s (l.schema/compile
+              (p/wrap-schema '{:queries {:concepts {:type (list :Concept)}}
+                               :objects {:Concept {:fields {:id {:type String}}}}}
+                             {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
+                              :Concept {:id (wrap-count-invocations fetch-identity)}}))]
+      (is (= {:invocations #{[fetch-2-concepts nil nil]
+                             [fetch-identity nil nil #{1 2}]}
+              :result {:data {:concepts [{:id "1"}
+                                         {:id "2"}]}}}
+             (with-invocation-counter
+               (l/execute s "{concepts {id}}" {} {}))))))
+  (testing "across args"
+    (let [s (l.schema/compile
+              (p/wrap-schema '{:queries {:concepts {:type (list :Concept)}}
+                               :objects {:Concept {:fields {:id {:type String
+                                                                 :args {:theify {:type (non-null Boolean)
+                                                                                 :default-value false}}}}}}}
+                             {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
+                              :Concept {:id (wrap-count-invocations fetch-identity-or-theify)}}))]
+      (is (= {:invocations #{[fetch-2-concepts nil nil]
+                             [fetch-identity-or-theify nil {:theify true} #{1 2}]
+                             [fetch-identity-or-theify nil {:theify false} #{1 2}]}
+              :result {:data {:concepts [{:id "1" :the_id "the 1"}
+                                         {:id "2" :the_id "the 2"}]}}}
+             (with-invocation-counter
+               (l/execute s "{concepts {
+                                id
+                                the_id: id(theify: true)}}" {} {}))))))
+  (testing "across contexts"
+    (let [s (l.schema/compile
+              (p/wrap-schema '{:queries {:concepts {:type (list :Concept)}}
+                               :objects {:Concept {:fields {:id {:type String}
+                                                            :related {:type (list :Concept)}
+                                                            :broader {:type (list :Concept)}}}}}
+                             {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
+                              :Concept {:id (wrap-count-invocations fetch-identity)
+                                        :related (wrap-count-invocations fetch-related)
+                                        :broader (wrap-count-invocations fetch-broader)}}))]
+      (is (= {:invocations #{[fetch-2-concepts nil nil]
+                             [fetch-related nil nil #{1 2}]
+                             [fetch-broader nil nil #{1 2}]
+                             [fetch-identity {:broader true} nil #{0 1}]
+                             [fetch-identity {:related true} nil #{3 2}]}
+              :result {:data {:concepts [{:related [{:id "2"}]
+                                          :broader [{:id "0"}]}
+                                         {:related [{:id "3"}]
+                                          :broader [{:id "1"}]}]}}}
+             (with-invocation-counter
+               (l/execute s "{concepts {
+                                related {id}
+                                broader {id}}}" {} {}))))))
+  (testing "at depth"
+    (let [s (l.schema/compile
+              (p/wrap-schema '{:queries {:concepts {:type (list :Concept)}}
+                               :objects {:Concept {:fields {:id {:type String}
+                                                            :related {:type (list :Concept)}
+                                                            :broader {:type (list :Concept)}}}}}
+                             {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
+                              :Concept {:id (wrap-count-invocations fetch-identity)
+                                        :related (wrap-count-invocations fetch-related)
+                                        :broader (wrap-count-invocations fetch-broader)}}))]
+      (is (= {:invocations #{;; depth 0: concepts
+                             [fetch-2-concepts nil nil]
+                             ;; depth 1: related and broader
+                             [fetch-related nil nil #{1 2}]
+                             [fetch-broader nil nil #{1 2}]
+                             ;; depth 2: broader
+                             [fetch-broader {:related true} nil #{3 2}]
+                             [fetch-broader {:broader true} nil #{0 1}]
+                             ;; depth 3: ids
+                             [fetch-identity {:related true :broader true} nil #{1 2}]
+                             [fetch-identity {:broader true} nil #{0 -1}]}
+              :result {:data {:concepts [{:related [{:broader [{:id "1"}]}]
+                                          :broader [{:broader [{:id "-1"}]}]}
+                                         {:related [{:broader [{:id "2"}]}]
+                                          :broader [{:broader [{:id "0"}]}]}]}}}
+             (with-invocation-counter
+               (l/execute s "{concepts {
+                                related { broader { id }}
+                                broader { broader { id }}}}" {} {})))))))
+
+(deftest plusinia-accumulates-contexts
+  (let [s (l.schema/compile
+            (p/wrap-schema '{:queries {:concepts {:type (list :Concept)}}
+                             :objects {:Concept {:fields {:id {:type String}
+                                                          :related {:type (list :Concept)}
+                                                          :broader {:type (list :Concept)}}}}}
+                           {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
+                            :Concept {:id (wrap-count-invocations fetch-identity)
+                                      :related (wrap-count-invocations fetch-related)
+                                      :broader (wrap-count-invocations fetch-broader)}}))]
+    (is (= {:invocations #{;; depth 0: contexts
+                           [fetch-2-concepts nil nil]
+                           ;; depth 1: related, adds :related true
+                           [fetch-related nil nil #{1 2}]
+                           ;; depth 2: broader, adds :broader true
+                           [fetch-broader {:related true} nil #{3 2}]
+                           ;; depth 3: ids, has both :related and :broader
+                           [fetch-identity {:related true :broader true} nil #{1 2}]}
+            :result {:data {:concepts [{:related [{:broader [{:id "1"}]}]}
+                                       {:related [{:broader [{:id "2"}]}]}]}}}
+           (with-invocation-counter
+             (l/execute s "{concepts { related { broader { id }} }}" {} {}))))))
+
+(defn- fetch-events [_ _]
+  [(p/make-node [1 "2021-04-14"] :type :Created)
+   (p/make-node [2 "2021-04-14"] :type :Created)
+   (p/make-node [3 "2021-05-01"] :type :Updated)
+   (p/make-node [4 "2021-05-09"] :type :Deleted)])
+
+(defn- fetch-event-ids [_ _ vals]
+  (zipmap vals (map first vals)))
+
+(defn- fetch-event-times [_ _ vals]
+  (zipmap vals (map second vals)))
+
+(defn- fetch-update-event-ids [_ _ vals]
+  (zipmap vals (map #(str "upd_" (first %)) vals)))
+
+(deftest plusinia-supports-interfaces
+  (testing "allows impls on interfaces and overrides"
+    (let [s (l.schema/compile
+              (p/wrap-schema
+                '{:queries {:changes {:type (non-null (list (non-null :Event)))}}
+                  :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
+                  :objects {:Created {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}
+                                               :createdAt {:type (non-null String)}}}
+                            :Updated {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}
+                                               :updatedAt {:type (non-null String)}}}
+                            :Deleted {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}
+                                               :deletedAt {:type (non-null String)}}}}}
+                {:Query {:changes (wrap-count-invocations fetch-events)}
+                 :Event {:id (wrap-count-invocations fetch-event-ids)}
+                 :Created {:createdAt (wrap-count-invocations fetch-event-times)}
+                 :Updated {:updatedAt (wrap-count-invocations fetch-event-times)
+                           :id (wrap-count-invocations fetch-update-event-ids)}
+                 :Deleted {:deletedAt (wrap-count-invocations fetch-event-times)}}))]
+      (is (= {:invocations #{[fetch-events nil nil]
+                             [fetch-event-ids nil nil #{[1 "2021-04-14"] [2 "2021-04-14"] [4 "2021-05-09"]}]
+                             [fetch-event-times nil nil #{[1 "2021-04-14"] [2 "2021-04-14"]}]
+                             [fetch-update-event-ids nil nil #{[3 "2021-05-01"]}]}
+              :result {:data {:changes [{:event :Created :id "1" :createdAt "2021-04-14"}
+                                        {:event :Created :id "2" :createdAt "2021-04-14"}
+                                        {:event :Updated :id "upd_3"}
+                                        {:event :Deleted :id "4"}]}}}
+             (with-invocation-counter
+               (l/execute s "{changes {
+                                event: __typename
+                                id
+                                ... on Created { createdAt }}}" {} {}))))))
+  (testing "throws if query to abstract type does not return typed nodes"
+    #_TODO...)
+  (testing "throws if query to abstract type returns nodes of incompatible type"
+    #_TODO...))
+
+(deftest plusinia-supports-unions
+  #_TODO...)
+
+(deftest plusinia-supports-requesting-data-from-lacinia-context
+  #_TODO...)
