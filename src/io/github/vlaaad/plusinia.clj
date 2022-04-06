@@ -218,7 +218,14 @@
                                       (l.schema/tag-with-type t))))))))
                   input-node->output-node-or-nodes)
                 (into {}
-                      (map (juxt key #(-> % val (map-or-invoke get-value))))
+                      (map
+                        (juxt
+                          key
+                          #(-> % val (map-or-invoke (fn [output-node]
+                                                      (let [t (get-type output-node)]
+                                                        (cond-> (get-value output-node)
+                                                                t
+                                                                (l.schema/tag-with-type t))))))))
                       input-node->output-node-or-nodes))))))
       selector->input-nodes)))
 

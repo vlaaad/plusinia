@@ -193,6 +193,28 @@
                                 event: __typename
                                 id
                                 ... on Created { createdAt }}}" {} {}))))))
+  (testing "allows queries without sub-selections (only type info)"
+    (let [s (l.schema/compile
+              (p/wrap-schema
+                '{:queries {:changes {:type (non-null (list (non-null :Event)))}}
+                  :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
+                  :objects {:Created {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Updated {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Deleted {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}}}
+                {:Query {:changes (fn [_ _]
+                                    [(p/make-node {:id 1 :time "2021-04-14"} :type :Created)
+                                     (p/make-node {:id 2 :time "2021-04-14"} :type :Created)
+                                     (p/make-node {:id 3 :time "2021-05-01"} :type :Updated)
+                                     (p/make-node {:id 4 :time "2021-05-09"} :type :Deleted)])}
+                 :Event {:id fetch-event-ids}}))]
+      (is (= {:data {:changes [{:type :Created}
+                               {:type :Created}
+                               {:type :Updated}
+                               {:type :Deleted}]}}
+             (l/execute s "{ changes { type: __typename } }" {} {})))))
   (testing "throws if query to abstract type does not return typed nodes"
     (let [s (l.schema/compile
               (p/wrap-schema
@@ -279,24 +301,3 @@
             :result {:data {:concepts [{:id "_1_"} {:id "_2_"}]}}}
            (with-invocation-counter
              (l/execute s "{concepts { id }}" {} {:str wrap-in-underscores}))))))
-
-(comment
-
-  *ns*
-
-  ;; FIXME: this fails!
-  (let [s (l.schema/compile
-            (p/wrap-schema
-              '{:queries {:changes {:type (non-null (list (non-null :Event)))}}
-                :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
-                :objects {:Created {:implements [:Event]
-                                    :fields {:id {:type (non-null String)}}}
-                          :Updated {:implements [:Event]
-                                    :fields {:id {:type (non-null String)}}}
-                          :Deleted {:implements [:Event]
-                                    :fields {:id {:type (non-null String)}}}}}
-              {:Query {:changes fetch-events}
-               :Event {:id fetch-event-ids}}))]
-    (l/execute s "{ changes { __typename } }" {} {}))
-
-  ,)
