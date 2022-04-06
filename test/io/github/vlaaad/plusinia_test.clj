@@ -7,9 +7,10 @@
 (def ^:private ^:dynamic *invocations*)
 
 (defn- wrap-count-invocations [f]
-  (fn [& args]
-    (swap! *invocations* conj (into [f] args))
-    (apply f args)))
+  (with-meta (fn [& args]
+               (swap! *invocations* conj (into [f] args))
+               (apply f args))
+             (meta f)))
 
 (defmacro with-invocation-counter [& body]
   `(binding [*invocations* (atom #{})]
@@ -237,11 +238,9 @@
               {:Query {:entities (wrap-count-invocations fetch-entities)}
                :Event {:id (wrap-count-invocations fetch-event-ids)}
                :Concept {:id (wrap-count-invocations fetch-identity)}}))]
-    (is (= {:invocations #{[io.github.vlaaad.plusinia-test/fetch-entities nil nil]
-                           [io.github.vlaaad.plusinia-test/fetch-identity nil nil #{1 2}]
-                           [io.github.vlaaad.plusinia-test/fetch-event-ids nil nil #{[3 "2021-05-01"]
-                                                                                     [1 "2021-04-14"]
-                                                                                     [2 "2021-04-14"]}]}
+    (is (= {:invocations #{[fetch-entities nil nil]
+                           [fetch-identity nil nil #{1 2}]
+                           [fetch-event-ids nil nil #{[1 "2021-04-14"] [2 "2021-04-14"] [3 "2021-05-01"]}]}
             :result {:data {:entities [{:type :Concept :id "1"}
                                        {:type :Concept :id "2"}
                                        {:type :Created :created_id "1"}
@@ -255,8 +254,31 @@
                               ... on Created { created_id: id }
                               ... on Updated { id }}}" {} {}))))))
 
+(defn- fetch-with-ctx-transform [{:keys [str]} _ vals]
+  (zipmap vals (map str vals)))
+
+(defn- wrap-in-underscores [x]
+  (str "_" x "_"))
+
 (deftest plusinia-supports-requesting-data-from-lacinia-context
-  #_TODO...)
+  (let [s (l.schema/compile
+            (p/wrap-schema
+              '{:queries {:concepts {:type (non-null (list (non-null :Concept)))}}
+                :objects {:Concept {:fields {:id {:type (non-null String)}}}}}
+              {:Query {:concepts (p/make-query-fetcher
+                                   (wrap-count-invocations fetch-2-concepts)
+                                   :context-keys [:str])}
+               :Concept {:id (wrap-count-invocations fetch-with-ctx-transform)}}))]
+    (is (= {:invocations #{[fetch-2-concepts {:str str} nil]
+                           [fetch-with-ctx-transform {:str str} nil #{1 2}]}
+            :result {:data {:concepts [{:id "1"} {:id "2"}]}}}
+           (with-invocation-counter
+             (l/execute s "{concepts { id }}" {} {:str str}))))
+    (is (= {:invocations #{[fetch-2-concepts {:str wrap-in-underscores} nil]
+                           [fetch-with-ctx-transform {:str wrap-in-underscores} nil #{1 2}]}
+            :result {:data {:concepts [{:id "_1_"} {:id "_2_"}]}}}
+           (with-invocation-counter
+             (l/execute s "{concepts { id }}" {} {:str wrap-in-underscores}))))))
 
 (comment
 

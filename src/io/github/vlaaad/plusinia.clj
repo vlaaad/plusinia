@@ -21,18 +21,28 @@
   (get-type [_]))
 
 (defn make-node [value & {:keys [context type]}]
-  (with-meta {::value value
-              ::context context
-              ::type type}
-             {`get-value ::value
-              `get-context ::context
-              `get-type ::type}))
+  (with-meta {::value value ::context context ::type type}
+             {`get-value ::value `get-context ::context `get-type ::type}))
 
 (defn- add-context-to-node [node parent-context]
   (make-node
     (get-value node)
     :context (merge parent-context (get-context node))
     :type (get-type node)))
+
+(defprotocol QueryFetcher
+  :extend-via-metadata true
+  (get-fetcher [this])
+  (get-context-keys [this]))
+
+(extend-protocol QueryFetcher
+  Object
+  (get-fetcher [this] this)
+  (get-context-keys [this]))
+
+(defn make-query-fetcher [fetcher & {:keys [context-keys]}]
+  (with-meta {::fetcher fetcher ::context-keys context-keys}
+             {`get-fetcher ::fetcher `get-context-keys ::context-keys}))
 
 (defn- make-selector [& {:keys [type field args selection]}]
   {:pre [field]}
@@ -214,7 +224,7 @@
 
 (defn- query-fetcher->field-fetcher [query-fetcher]
   (fn [ctx args values]
-    (zipmap values (repeat (query-fetcher ctx args)))))
+    (zipmap values (repeat ((get-fetcher query-fetcher) ctx args)))))
 
 (defn wrap-schema [schema fetchers]
   (let [type->parents (update-vals (group-by first (concat
@@ -231,12 +241,12 @@
                                (cons :Query)
                                (map (juxt identity #(into #{%} (type->parents %))))
                                (into {}))
-        fetchers (reduce-kv
-                   (fn [acc type parents]
-                     (let [defaults (mapv acc parents)]
-                       (update acc type #(apply merge (conj defaults %)))))
-                   (update fetchers :Query update-vals query-fetcher->field-fetcher)
-                   type->parents)]
+        type->field->fetcher (reduce-kv
+                               (fn [acc type parents]
+                                 (let [defaults (mapv acc parents)]
+                                   (update acc type #(apply merge (conj defaults %)))))
+                               (update fetchers :Query update-vals query-fetcher->field-fetcher)
+                               type->parents)]
     (-> schema
         (update :queries
                 (fn [qs]
@@ -245,15 +255,16 @@
                          (juxt
                            key
                            (fn [[query-name definition]]
-                             (require-fetcher fetchers :Query query-name)
-                             (assoc definition :resolve (fn [ctx args v]
-                                                          (let [k (make-selector :type :Query
-                                                                                 :field query-name
-                                                                                 :args args
-                                                                                 :selection (selection ctx))]
-                                                            (-> (fetch {k [v]} fetchers type->instance-of)
-                                                                (get k)
-                                                                (get v))))))))
+                             (let [context-keys (get-context-keys (require-fetcher fetchers :Query query-name))]
+                               (assoc definition :resolve (fn [ctx args v]
+                                                            (let [node (make-node v :context (not-empty (select-keys ctx context-keys)))
+                                                                  k (make-selector :type :Query
+                                                                                   :field query-name
+                                                                                   :args args
+                                                                                   :selection (selection ctx))]
+                                                              (-> (fetch {k [node]} type->field->fetcher type->instance-of)
+                                                                  (get k)
+                                                                  (get node)))))))))
                        (into {}))))
         (update :objects
                 (fn [os]
@@ -265,7 +276,7 @@
                                        (fn [fs]
                                          (->> fs
                                               (map (fn [[field-name field-definition]]
-                                                     (require-fetcher fetchers object-name field-name)
+                                                     (require-fetcher type->field->fetcher object-name field-name)
                                                      [field-name (assoc field-definition
                                                                    :resolve (getter field-name))]))
                                               (into {}))))]))
