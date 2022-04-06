@@ -193,12 +193,88 @@
                                 id
                                 ... on Created { createdAt }}}" {} {}))))))
   (testing "throws if query to abstract type does not return typed nodes"
-    #_TODO...)
+    (let [s (l.schema/compile
+              (p/wrap-schema
+                '{:queries {:changes {:type (non-null (list (non-null :Event)))}}
+                  :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
+                  :objects {:Created {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Updated {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Deleted {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}}}
+                {:Query {:changes (fn [_ _]
+                                    [(p/make-node [1 "2021-04-14"] :type :Created)
+                                     [2 "2021-04-14"]
+                                     (p/make-node [3 "2021-05-01"] :type :Updated)
+                                     (p/make-node [4 "2021-05-09"] :type :Deleted)])}
+                 :Event {:id fetch-event-ids}}))]
+      (is (thrown? Exception (l/execute s "{ changes { id } }" {} {})))))
   (testing "throws if query to abstract type returns nodes of incompatible type"
     #_TODO...))
 
+(defn- fetch-entities [_ _]
+  [(p/make-node 1 :type :Concept)
+   (p/make-node 2 :type :Concept)
+   (p/make-node [1 "2021-04-14"] :type :Created)
+   (p/make-node [2 "2021-04-14"] :type :Created)
+   (p/make-node [3 "2021-05-01"] :type :Updated)
+   (p/make-node [4 "2021-05-09"] :type :Deleted)])
+
 (deftest plusinia-supports-unions
-  #_TODO...)
+  (let [s (l.schema/compile
+            (p/wrap-schema
+              '{:queries {:entities {:type (non-null (list (non-null :Entity)))}}
+                :unions {:Entity {:members [:Concept :Created :Updated :Deleted]}}
+                :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
+                :objects {:Concept {:fields {:id {:type (non-null String)}}}
+                          :Created {:implements [:Event]
+                                    :fields {:id {:type (non-null String)}}}
+                          :Updated {:implements [:Event]
+                                    :fields {:id {:type (non-null String)}}}
+                          :Deleted {:implements [:Event]
+                                    :fields {:id {:type (non-null String)}}}}}
+              {:Query {:entities (wrap-count-invocations fetch-entities)}
+               :Event {:id (wrap-count-invocations fetch-event-ids)}
+               :Concept {:id (wrap-count-invocations fetch-identity)}}))]
+    (is (= {:invocations #{[io.github.vlaaad.plusinia-test/fetch-entities nil nil]
+                           [io.github.vlaaad.plusinia-test/fetch-identity nil nil #{1 2}]
+                           [io.github.vlaaad.plusinia-test/fetch-event-ids nil nil #{[3 "2021-05-01"]
+                                                                                     [1 "2021-04-14"]
+                                                                                     [2 "2021-04-14"]}]}
+            :result {:data {:entities [{:type :Concept :id "1"}
+                                       {:type :Concept :id "2"}
+                                       {:type :Created :created_id "1"}
+                                       {:type :Created :created_id "2"}
+                                       {:type :Updated :id "3"}
+                                       {:type :Deleted}]}}}
+           (with-invocation-counter
+             (l/execute s "{entities {
+                              type: __typename
+                              ... on Concept { id }
+                              ... on Created { created_id: id }
+                              ... on Updated { id }}}" {} {}))))))
 
 (deftest plusinia-supports-requesting-data-from-lacinia-context
   #_TODO...)
+
+(comment
+
+  *ns*
+
+  ;; FIXME: this fails!
+  (let [s (l.schema/compile
+            (p/wrap-schema
+              '{:queries {:changes {:type (non-null (list (non-null :Event)))}}
+                :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
+                :objects {:Created {:implements [:Event]
+                                    :fields {:id {:type (non-null String)}}}
+                          :Updated {:implements [:Event]
+                                    :fields {:id {:type (non-null String)}}}
+                          :Deleted {:implements [:Event]
+                                    :fields {:id {:type (non-null String)}}}}}
+              {:Query {:changes fetch-events}
+               :Event {:id fetch-event-ids}}))]
+    (l/execute s "{ changes { __typename } }" {} {}))
+
+  ,)

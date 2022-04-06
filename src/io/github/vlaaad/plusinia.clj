@@ -182,7 +182,7 @@
                   (-> selector->input-node->output-node-or-nodes
                       (get selector)
                       (select-keys input-nodes))]
-              (if-let [sub-selection (:selection selector)]
+              (if-let [sub-selection (:selection selector)] ;; FIXME or if output nodes have type?
                 (into
                   {}
                   (map
