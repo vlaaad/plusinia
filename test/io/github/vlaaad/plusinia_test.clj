@@ -232,9 +232,29 @@
                                      (p/make-node [3 "2021-05-01"] :type :Updated)
                                      (p/make-node [4 "2021-05-09"] :type :Deleted)])}
                  :Event {:id fetch-event-ids}}))]
-      (is (thrown? Exception (l/execute s "{ changes { id } }" {} {})))))
+      (is (thrown-with-msg? Exception #"Selected field :id of type :Event is abstract, but \[2 \"2021-04-14\"\] node does not specify its type"
+                            (l/execute s "{ changes { id } }" {} {})))))
   (testing "throws if query to abstract type returns nodes of incompatible type"
-    #_TODO...))
+    (let [s (l.schema/compile
+              (p/wrap-schema
+                '{:queries {:changes {:type (non-null (list (non-null :Event)))}}
+                  :interfaces {:Event {:fields {:id {:type (non-null String)}}}}
+                  :objects {:Created {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Updated {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Deleted {:implements [:Event]
+                                      :fields {:id {:type (non-null String)}}}
+                            :Concept {:fields {:id {:type (non-null String)}}}}}
+                {:Query {:changes (fn [_ _]
+                                    [(p/make-node [1 "2021-04-14"] :type :Created)
+                                     (p/make-node 2 :type :Concept)
+                                     (p/make-node [3 "2021-05-01"] :type :Updated)
+                                     (p/make-node [4 "2021-05-09"] :type :Deleted)])}
+                 :Event {:id fetch-event-ids}
+                 :Concept {:id fetch-identity}}))]
+      (is (thrown-with-msg? Exception #"Input node is of type :Concept, but :Event was requested"
+                            (l/execute s "{ changes { id } }" {} {}))))))
 
 (defn- fetch-entities [_ _]
   [(p/make-node 1 :type :Concept)

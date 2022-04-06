@@ -119,7 +119,7 @@
                           (when (nil? node-type)
                             (throw (ex-info (str "Selected field " requested-field
                                                  " of type " requested-type
-                                                 " is abstract, but " input-node
+                                                 " is abstract, but " (get-value input-node)
                                                  " node does not specify its type")
                                             {:field requested-field
                                              :type requested-type
