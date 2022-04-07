@@ -19,22 +19,22 @@
        {:result result#
         :invocations invocations#})))
 
-(defn- fetch-2-concepts [ctx args]
+(defn- fetch-2-concepts [_]
   [1 2])
 
-(defn- fetch-identity [ctx args values]
+(defn- fetch-identity [_ values]
   (zipmap values values))
 
-(defn- fetch-identity-or-theify [ctx {:keys [theify]} values]
+(defn- fetch-identity-or-theify [{:keys [theify]} values]
   (zipmap values (if theify
                    (map #(str "the " %) values)
                    values)))
 
-(defn- fetch-related [ctx args values]
+(defn- fetch-related [_ values]
   (zipmap values
           (map #(-> % inc (p/make-node :context {:related true}) vector) values)))
 
-(defn- fetch-broader [ctx args values]
+(defn- fetch-broader [_ values]
   (zipmap values
           (map #(-> % dec (p/make-node :context {:broader true}) vector) values)))
 
@@ -45,8 +45,8 @@
                                :objects {:Concept {:fields {:id {:type String}}}}}
                              {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
                               :Concept {:id (wrap-count-invocations fetch-identity)}}))]
-      (is (= {:invocations #{[fetch-2-concepts nil nil]
-                             [fetch-identity nil nil #{1 2}]}
+      (is (= {:invocations #{[fetch-2-concepts nil]
+                             [fetch-identity nil #{1 2}]}
               :result {:data {:concepts [{:id "1"}
                                          {:id "2"}]}}}
              (with-invocation-counter
@@ -59,9 +59,9 @@
                                                                                  :default-value false}}}}}}}
                              {:Query {:concepts (wrap-count-invocations fetch-2-concepts)}
                               :Concept {:id (wrap-count-invocations fetch-identity-or-theify)}}))]
-      (is (= {:invocations #{[fetch-2-concepts nil nil]
-                             [fetch-identity-or-theify nil {:theify true} #{1 2}]
-                             [fetch-identity-or-theify nil {:theify false} #{1 2}]}
+      (is (= {:invocations #{[fetch-2-concepts nil]
+                             [fetch-identity-or-theify {:theify true} #{1 2}]
+                             [fetch-identity-or-theify {:theify false} #{1 2}]}
               :result {:data {:concepts [{:id "1" :the_id "the 1"}
                                          {:id "2" :the_id "the 2"}]}}}
              (with-invocation-counter
@@ -78,11 +78,11 @@
                               :Concept {:id (wrap-count-invocations fetch-identity)
                                         :related (wrap-count-invocations fetch-related)
                                         :broader (wrap-count-invocations fetch-broader)}}))]
-      (is (= {:invocations #{[fetch-2-concepts nil nil]
-                             [fetch-related nil nil #{1 2}]
-                             [fetch-broader nil nil #{1 2}]
-                             [fetch-identity {:broader true} nil #{0 1}]
-                             [fetch-identity {:related true} nil #{3 2}]}
+      (is (= {:invocations #{[fetch-2-concepts nil]
+                             [fetch-related nil #{1 2}]
+                             [fetch-broader nil #{1 2}]
+                             [fetch-identity {:broader true} #{0 1}]
+                             [fetch-identity {:related true} #{3 2}]}
               :result {:data {:concepts [{:related [{:id "2"}]
                                           :broader [{:id "0"}]}
                                          {:related [{:id "3"}]
@@ -102,16 +102,16 @@
                                         :related (wrap-count-invocations fetch-related)
                                         :broader (wrap-count-invocations fetch-broader)}}))]
       (is (= {:invocations #{;; depth 0: concepts
-                             [fetch-2-concepts nil nil]
+                             [fetch-2-concepts nil]
                              ;; depth 1: related and broader
-                             [fetch-related nil nil #{1 2}]
-                             [fetch-broader nil nil #{1 2}]
+                             [fetch-related nil #{1 2}]
+                             [fetch-broader nil #{1 2}]
                              ;; depth 2: broader
-                             [fetch-broader {:related true} nil #{3 2}]
-                             [fetch-broader {:broader true} nil #{0 1}]
+                             [fetch-broader {:related true} #{3 2}]
+                             [fetch-broader {:broader true} #{0 1}]
                              ;; depth 3: ids
-                             [fetch-identity {:related true :broader true} nil #{1 2}]
-                             [fetch-identity {:broader true} nil #{0 -1}]}
+                             [fetch-identity {:related true :broader true} #{1 2}]
+                             [fetch-identity {:broader true} #{0 -1}]}
               :result {:data {:concepts [{:related [{:broader [{:id "1"}]}]
                                           :broader [{:broader [{:id "-1"}]}]}
                                          {:related [{:broader [{:id "2"}]}]
@@ -132,31 +132,31 @@
                                       :related (wrap-count-invocations fetch-related)
                                       :broader (wrap-count-invocations fetch-broader)}}))]
     (is (= {:invocations #{;; depth 0: contexts
-                           [fetch-2-concepts nil nil]
+                           [fetch-2-concepts nil]
                            ;; depth 1: related, adds :related true
-                           [fetch-related nil nil #{1 2}]
+                           [fetch-related nil #{1 2}]
                            ;; depth 2: broader, adds :broader true
-                           [fetch-broader {:related true} nil #{3 2}]
+                           [fetch-broader {:related true} #{3 2}]
                            ;; depth 3: ids, has both :related and :broader
-                           [fetch-identity {:related true :broader true} nil #{1 2}]}
+                           [fetch-identity {:related true :broader true} #{1 2}]}
             :result {:data {:concepts [{:related [{:broader [{:id "1"}]}]}
                                        {:related [{:broader [{:id "2"}]}]}]}}}
            (with-invocation-counter
              (l/execute s "{concepts { related { broader { id }} }}" {} {}))))))
 
-(defn- fetch-events [_ _]
+(defn- fetch-events [_]
   [(p/make-node [1 "2021-04-14"] :type :Created)
    (p/make-node [2 "2021-04-14"] :type :Created)
    (p/make-node [3 "2021-05-01"] :type :Updated)
    (p/make-node [4 "2021-05-09"] :type :Deleted)])
 
-(defn- fetch-event-ids [_ _ vals]
+(defn- fetch-event-ids [_ vals]
   (zipmap vals (map first vals)))
 
-(defn- fetch-event-times [_ _ vals]
+(defn- fetch-event-times [_ vals]
   (zipmap vals (map second vals)))
 
-(defn- fetch-update-event-ids [_ _ vals]
+(defn- fetch-update-event-ids [_ vals]
   (zipmap vals (map #(str "upd_" (first %)) vals)))
 
 (deftest plusinia-supports-interfaces
@@ -180,10 +180,10 @@
                  :Updated {:updatedAt (wrap-count-invocations fetch-event-times)
                            :id (wrap-count-invocations fetch-update-event-ids)}
                  :Deleted {:deletedAt (wrap-count-invocations fetch-event-times)}}))]
-      (is (= {:invocations #{[fetch-events nil nil]
-                             [fetch-event-ids nil nil #{[1 "2021-04-14"] [2 "2021-04-14"] [4 "2021-05-09"]}]
-                             [fetch-event-times nil nil #{[1 "2021-04-14"] [2 "2021-04-14"]}]
-                             [fetch-update-event-ids nil nil #{[3 "2021-05-01"]}]}
+      (is (= {:invocations #{[fetch-events nil]
+                             [fetch-event-ids nil #{[1 "2021-04-14"] [2 "2021-04-14"] [4 "2021-05-09"]}]
+                             [fetch-event-times nil #{[1 "2021-04-14"] [2 "2021-04-14"]}]
+                             [fetch-update-event-ids nil #{[3 "2021-05-01"]}]}
               :result {:data {:changes [{:event :Created :id "1" :createdAt "2021-04-14"}
                                         {:event :Created :id "2" :createdAt "2021-04-14"}
                                         {:event :Updated :id "upd_3"}
@@ -204,7 +204,7 @@
                                       :fields {:id {:type (non-null String)}}}
                             :Deleted {:implements [:Event]
                                       :fields {:id {:type (non-null String)}}}}}
-                {:Query {:changes (fn [_ _]
+                {:Query {:changes (fn [_]
                                     [(p/make-node {:id 1 :time "2021-04-14"} :type :Created)
                                      (p/make-node {:id 2 :time "2021-04-14"} :type :Created)
                                      (p/make-node {:id 3 :time "2021-05-01"} :type :Updated)
@@ -226,7 +226,7 @@
                                       :fields {:id {:type (non-null String)}}}
                             :Deleted {:implements [:Event]
                                       :fields {:id {:type (non-null String)}}}}}
-                {:Query {:changes (fn [_ _]
+                {:Query {:changes (fn [_]
                                     [(p/make-node [1 "2021-04-14"] :type :Created)
                                      [2 "2021-04-14"]
                                      (p/make-node [3 "2021-05-01"] :type :Updated)
@@ -246,7 +246,7 @@
                             :Deleted {:implements [:Event]
                                       :fields {:id {:type (non-null String)}}}
                             :Concept {:fields {:id {:type (non-null String)}}}}}
-                {:Query {:changes (fn [_ _]
+                {:Query {:changes (fn [_]
                                     [(p/make-node [1 "2021-04-14"] :type :Created)
                                      (p/make-node 2 :type :Concept)
                                      (p/make-node [3 "2021-05-01"] :type :Updated)
@@ -256,7 +256,7 @@
       (is (thrown-with-msg? Exception #"Input node is of type :Concept, but :Event was requested"
                             (l/execute s "{ changes { id } }" {} {}))))))
 
-(defn- fetch-entities [_ _]
+(defn- fetch-entities [_]
   [(p/make-node 1 :type :Concept)
    (p/make-node 2 :type :Concept)
    (p/make-node [1 "2021-04-14"] :type :Created)
@@ -280,9 +280,9 @@
               {:Query {:entities (wrap-count-invocations fetch-entities)}
                :Event {:id (wrap-count-invocations fetch-event-ids)}
                :Concept {:id (wrap-count-invocations fetch-identity)}}))]
-    (is (= {:invocations #{[fetch-entities nil nil]
-                           [fetch-identity nil nil #{1 2}]
-                           [fetch-event-ids nil nil #{[1 "2021-04-14"] [2 "2021-04-14"] [3 "2021-05-01"]}]}
+    (is (= {:invocations #{[fetch-entities nil]
+                           [fetch-identity nil #{1 2}]
+                           [fetch-event-ids nil #{[1 "2021-04-14"] [2 "2021-04-14"] [3 "2021-05-01"]}]}
             :result {:data {:entities [{:type :Concept :id "1"}
                                        {:type :Concept :id "2"}
                                        {:type :Created :created_id "1"}
@@ -296,7 +296,7 @@
                               ... on Created { created_id: id }
                               ... on Updated { id }}}" {} {}))))))
 
-(defn- fetch-with-ctx-transform [{:keys [str]} _ vals]
+(defn- fetch-with-ctx-transform [{:keys [str]} vals]
   (zipmap vals (map str vals)))
 
 (defn- wrap-in-underscores [x]
@@ -309,15 +309,54 @@
                 :objects {:Concept {:fields {:id {:type (non-null String)}}}}}
               {:Query {:concepts (p/make-query-fetcher
                                    (wrap-count-invocations fetch-2-concepts)
-                                   :context-keys [:str])}
+                                   :context-keys #{:str})}
                :Concept {:id (wrap-count-invocations fetch-with-ctx-transform)}}))]
-    (is (= {:invocations #{[fetch-2-concepts {:str str} nil]
-                           [fetch-with-ctx-transform {:str str} nil #{1 2}]}
+    (is (= {:invocations #{[fetch-2-concepts {:str str}]
+                           [fetch-with-ctx-transform {:str str} #{1 2}]}
             :result {:data {:concepts [{:id "1"} {:id "2"}]}}}
            (with-invocation-counter
              (l/execute s "{concepts { id }}" {} {:str str}))))
-    (is (= {:invocations #{[fetch-2-concepts {:str wrap-in-underscores} nil]
-                           [fetch-with-ctx-transform {:str wrap-in-underscores} nil #{1 2}]}
+    (is (= {:invocations #{[fetch-2-concepts {:str wrap-in-underscores}]
+                           [fetch-with-ctx-transform {:str wrap-in-underscores} #{1 2}]}
             :result {:data {:concepts [{:id "_1_"} {:id "_2_"}]}}}
            (with-invocation-counter
              (l/execute s "{concepts { id }}" {} {:str wrap-in-underscores}))))))
+
+(defn- key-by-shape [ctx args value]
+  (merge ctx args (select-keys value [:shape])))
+
+(defn- fetch-shapes [_]
+  [{:shape :rect :width 10 :height 20}
+   {:shape :rect :width 20 :height 10}
+   {:shape :square :width 15}])
+
+(defn- fetch-shape-type [_ vals]
+  (zipmap vals (map (comp name :shape) vals)))
+
+(defn- fetch-area [{:keys [shape]} values]
+  (let [area-fn (case shape
+                  :rect #(* (:width %) (:height %))
+                  :square #(* (:width %) (:width %)))]
+    (zipmap values (map area-fn values))))
+
+(deftest plusinia-allows-custom-keys
+  (let [s (l.schema/compile
+            (p/wrap-schema
+              '{:queries {:shapes {:type (non-null (list (non-null :Shape)))}}
+                :objects {:Shape {:fields {:type {:type (non-null String)}
+                                           :area {:type (non-null Int)}}}}}
+              {:Query {:shapes (wrap-count-invocations fetch-shapes)}
+               :Shape {:type fetch-shape-type
+                       :area (p/make-field-fetcher (wrap-count-invocations fetch-area) :key-fn key-by-shape)}}))]
+    (is (= {:invocations #{[fetch-shapes nil]
+                           [fetch-area {:shape :rect} #{{:shape :rect :width 20 :height 10}
+                                                        {:shape :rect :width 10 :height 20}}]
+                           [fetch-area {:shape :square} #{{:shape :square :width 15}}]}
+            :result {:data {:shapes [{:type "rect"
+                                      :area 200}
+                                     {:type "rect"
+                                      :area 200}
+                                     {:type "square"
+                                      :area 225}]}}}
+           (with-invocation-counter
+             (l/execute s "{shapes { type area }}" {} {}))))))

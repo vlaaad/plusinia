@@ -29,19 +29,26 @@
     :context (merge parent-context (get-context node))
     :type (get-type node)))
 
-(defprotocol QueryFetcher
-  :extend-via-metadata true
-  (get-fetcher [this])
-  (get-context-keys [this]))
+(defn- get-fetch-fn [fetcher]
+  (cond-> fetcher (map? fetcher) :fn))
 
-(extend-protocol QueryFetcher
-  Object
-  (get-fetcher [this] this)
-  (get-context-keys [_]))
+(defn- get-context-keys [fetcher]
+  (when (map? fetcher) (:context-keys fetcher)))
 
-(defn make-query-fetcher [fetcher & {:keys [context-keys]}]
-  (with-meta {::fetcher fetcher ::context-keys context-keys}
-             {`get-fetcher ::fetcher `get-context-keys ::context-keys}))
+(defn- default-fetch-key-fn [ctx args _]
+  (when (or ctx args)
+    (conj (or ctx {}) args)))
+
+(defn- get-fetch-key-fn [fetcher]
+  (if (map? fetcher) (:key-fn fetcher) default-fetch-key-fn))
+
+(defn make-query-fetcher [fn & {:keys [context-keys key-fn]
+                                :or {key-fn default-fetch-key-fn}}]
+  {:fn fn :context-keys context-keys :key-fn key-fn})
+
+(defn make-field-fetcher [fn & {:keys [key-fn]}]
+  {:pre [key-fn]}
+  {:fn fn :key-fn key-fn})
 
 (defn- make-selector [& {:keys [type field args selection]}]
   {:pre [field]}
@@ -131,11 +138,10 @@
                 ;; skip when requested type is concrete and not equal to node type
                 :when (not (and request-concrete-type
                                 (some? node-type)
-                                (not= requested-type node-type)))]
-            [{:fetcher (require-fetcher type->field->fetcher (or node-type requested-type) requested-field)
-              :field requested-field
-              :args (:args selector)
-              :ctx (get-context input-node)}
+                                (not= requested-type node-type)))
+                :let [fetcher (require-fetcher type->field->fetcher (or node-type requested-type) requested-field)]]
+            [{:fetch-fn (get-fetch-fn fetcher)
+              :key ((get-fetch-key-fn fetcher) (get-context input-node) (:args selector) (get-value input-node))}
              input-node
              selector]))
         selector->input-node->output-node-or-nodes
@@ -144,18 +150,17 @@
             (update acc selector assoc input-node output-node-or-nodes))
           {}
           ;; todo parallelize
-          (for [[{:keys [fetcher args ctx field]} input-node->selectors] fetch-key->input-node->selectors
+          (for [[{:keys [fetch-fn key]} input-node->selectors] fetch-key->input-node->selectors
                 :let [values (into #{} (map get-value) (keys input-node->selectors))
-                      value->output-node-or-nodes (fetcher ctx args values)
+                      value->output-node-or-nodes (fetch-fn key values)
                       _ (when-not (and (map? value->output-node-or-nodes)
                                        (every? #(contains? value->output-node-or-nodes %) values)
                                        (= (count value->output-node-or-nodes) (count values)))
-                          (throw (ex-info (str "Invalid result by " field " fetcher")
+                          (throw (ex-info (str "Invalid result by " fetch-fn " fetch-fn")
                                           {:result value->output-node-or-nodes
                                            :values values
-                                           :args args
-                                           :field field
-                                           :fetcher fetcher})))]
+                                           :fetch-fn fetch-fn
+                                           :key key})))]
                 [input-node selectors] input-node->selectors
                 selector selectors]
             [selector input-node (value->output-node-or-nodes (get-value input-node))]))
@@ -229,8 +234,8 @@
       selector->input-nodes)))
 
 (defn- query-fetcher->field-fetcher [query-fetcher]
-  (fn [ctx args values]
-    (zipmap values (repeat ((get-fetcher query-fetcher) ctx args)))))
+  (fn [key values]
+    (zipmap values (repeat ((get-fetch-fn query-fetcher) key)))))
 
 (defn wrap-schema [schema fetchers]
   (let [type->parents (update-vals (group-by first (concat
