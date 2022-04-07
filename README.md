@@ -26,13 +26,16 @@ and batching in the root query resolver. Then, it transforms the results so reso
 other fields are simple map lookups. 
 
 The main difference between Lacinia resolver and Plusinia fetcher is:
-- Lacinia resolver is given a value and returns a resolved result;
-- Plusinia fetcher is given a set of values and returns a map from value to result.
+- Lacinia resolver transforms a value to result;
+- Plusinia fetcher transforms a set of values to map from value to result.
 
 Also, Lacinia query resolvers receive synthetic `nil` as input value, while Plusinia query
 fetchers don't receive a useless input value at all.
 
-Plusinia batches resolvers by field + context + args + nesting depth of the query.
+Plusinia batches resolvers by a permutation of:
+- field fetcher fn;
+- batch key (defaults to a merge of context and args, can be overridden);
+- nesting depth of the query.
 
 Here is an illustrative example:
 ```graphql

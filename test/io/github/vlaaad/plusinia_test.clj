@@ -322,8 +322,8 @@
            (with-invocation-counter
              (l/execute s "{concepts { id }}" {} {:str wrap-in-underscores}))))))
 
-(defn- key-by-shape [ctx args value]
-  (merge ctx args (select-keys value [:shape])))
+(defn- batch-by-shape [_ _ value]
+  (:shape value))
 
 (defn- fetch-shapes [_]
   [{:shape :rect :width 10 :height 20}
@@ -333,7 +333,7 @@
 (defn- fetch-shape-type [_ vals]
   (zipmap vals (map (comp name :shape) vals)))
 
-(defn- fetch-area [{:keys [shape]} values]
+(defn- fetch-area [shape values]
   (let [area-fn (case shape
                   :rect #(* (:width %) (:height %))
                   :square #(* (:width %) (:width %)))]
@@ -347,11 +347,11 @@
                                            :area {:type (non-null Int)}}}}}
               {:Query {:shapes (wrap-count-invocations fetch-shapes)}
                :Shape {:type fetch-shape-type
-                       :area (p/make-field-fetcher (wrap-count-invocations fetch-area) :key-fn key-by-shape)}}))]
+                       :area (p/make-field-fetcher (wrap-count-invocations fetch-area) :batch-fn batch-by-shape)}}))]
     (is (= {:invocations #{[fetch-shapes nil]
-                           [fetch-area {:shape :rect} #{{:shape :rect :width 20 :height 10}
-                                                        {:shape :rect :width 10 :height 20}}]
-                           [fetch-area {:shape :square} #{{:shape :square :width 15}}]}
+                           [fetch-area :rect #{{:shape :rect :width 20 :height 10}
+                                               {:shape :rect :width 10 :height 20}}]
+                           [fetch-area :square #{{:shape :square :width 15}}]}
             :result {:data {:shapes [{:type "rect"
                                       :area 200}
                                      {:type "rect"
