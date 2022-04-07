@@ -1,7 +1,6 @@
 (ns io.github.vlaaad.plusinia
   (:require [com.walmartlabs.lacinia.schema :as l.schema]
-            [com.walmartlabs.lacinia.executor :as l.executor]
-            [com.walmartlabs.lacinia :as l]))
+            [com.walmartlabs.lacinia.executor :as l.executor]))
 
 (defprotocol Node
   :extend-via-metadata true
@@ -38,7 +37,7 @@
 (extend-protocol QueryFetcher
   Object
   (get-fetcher [this] this)
-  (get-context-keys [this]))
+  (get-context-keys [_]))
 
 (defn make-query-fetcher [fetcher & {:keys [context-keys]}]
   (with-meta {::fetcher fetcher ::context-keys context-keys}
@@ -192,7 +191,7 @@
                   (-> selector->input-node->output-node-or-nodes
                       (get selector)
                       (select-keys input-nodes))]
-              (if-let [sub-selection (:selection selector)] ;; FIXME or if output nodes have type?
+              (if-let [sub-selection (:selection selector)]
                 (into
                   {}
                   (map
