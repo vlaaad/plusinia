@@ -234,8 +234,11 @@
       selector->input-nodes)))
 
 (defn- query-fetcher->field-fetcher [query-fetcher]
-  (fn [key values]
-    (zipmap values (repeat ((get-fetch-fn query-fetcher) key)))))
+  (let [fetch-fn (get-fetch-fn query-fetcher)]
+    (make-field-fetcher
+      (fn [key values]
+        (zipmap values (repeat (fetch-fn key))))
+      :batch-fn (get-batch-fn query-fetcher))))
 
 (defn wrap-schema [schema fetchers]
   (let [type->parents (update-vals (group-by first (concat
