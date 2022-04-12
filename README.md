@@ -19,6 +19,10 @@ execution times due to time windows where execution engine waits for batch to fi
 Plusinia provides an alternative solution for a use case where individual query execution 
 time is more important than overall server performance.
 
+# Using the library
+
+TODO: simple example...
+
 # How it works
 
 Plusinia uses query introspection capabilities of Lacinia to perform all fetching 
@@ -48,6 +52,10 @@ Here is an illustrative example:
 }
 ```
 
-# Using the library
+# Tips and tricks
 
-TODO...
+TODO: 
+- query resolvers
+- interfaces and unions
+- simple value transformers
+- parallelization (futures, thread pool)
