@@ -236,10 +236,6 @@
                       input-node->output-node-or-nodes))))))
       selector->input-nodes)))
 
-(defn fetch-on-batch-only [f]
-  (fn [batch values]
-    (zipmap values (repeat (f batch)))))
-
 (defn wrap-schema [schema fetchers & {:keys [execute-batches]
                                       :or {execute-batches execute-batches-sequentially}}]
   (let [type->parents (update-vals (group-by first (concat

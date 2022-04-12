@@ -29,9 +29,6 @@ The main difference between Lacinia resolver and Plusinia fetcher is:
 - Lacinia resolver transforms a value to result;
 - Plusinia fetcher transforms a set of values to map from value to result.
 
-Also, Lacinia query resolvers receive synthetic `nil` as input value, while Plusinia query
-fetchers don't receive a useless input value at all.
-
 Plusinia batches resolvers by a permutation of:
 - field fetcher fn;
 - batch key (defaults to a merge of context and args, can be overridden);
