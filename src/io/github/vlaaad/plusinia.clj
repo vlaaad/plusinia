@@ -149,27 +149,21 @@
              selector]))
         batches (mapv
                   (fn [[{:keys [fetch-fn batch]} input-node->selectors]]
-                    (let [values (into #{} (map get-value) (keys input-node->selectors))]
-                      (fn execute-batch []
-                        (let [value->output-node-or-nodes (fetch-fn batch values)]
-                          (when-not (and (map? value->output-node-or-nodes)
-                                         (every? #(contains? value->output-node-or-nodes %) values)
-                                         (= (count value->output-node-or-nodes) (count values)))
-                            (throw (ex-info (str "Invalid result by " fetch-fn " fetch-fn")
-                                            {:result value->output-node-or-nodes
-                                             :values values
-                                             :fetch-fn fetch-fn
-                                             :batch batch})))
-                          value->output-node-or-nodes))))
+                    #(fetch-fn batch (into #{} (map get-value) (keys input-node->selectors))))
                   fetch-key->input-node->selectors)
         selector->input-node->output-node-or-nodes
         (reduce
           (fn [acc [selector input-node output-node-or-nodes]]
             (update acc selector assoc input-node output-node-or-nodes))
           {}
-          (for [[[_ input-node->selectors] value->output-node-or-nodes] (map vector
-                                                                             fetch-key->input-node->selectors
-                                                                             (execute-batches-sequentially batches))
+          (for [[[fetch-key input-node->selectors] value->output-node-or-nodes] (map vector
+                                                                                     fetch-key->input-node->selectors
+                                                                                     (execute-batches batches))
+                :let [_ (when-not (map? value->output-node-or-nodes)
+                          (throw (ex-info (str "Invalid result by " (:fetch-fn fetch-key) " fetch-fn")
+                                          {:result value->output-node-or-nodes
+                                           :fetch-fn (:fetch-fn fetch-key)
+                                           :batch (:batch fetch-key)})))]
                 [input-node selectors] input-node->selectors
                 selector selectors]
             [selector input-node (value->output-node-or-nodes (get-value input-node))]))
@@ -242,12 +236,9 @@
                       input-node->output-node-or-nodes))))))
       selector->input-nodes)))
 
-(defn- query-fetcher->field-fetcher [query-fetcher]
-  (let [fetch-fn (get-fetch-fn query-fetcher)]
-    (make-field-fetcher
-      (fn [key values]
-        (zipmap values (repeat (fetch-fn key))))
-      :batch-fn (get-batch-fn query-fetcher))))
+(defn fetch-on-batch-only [f]
+  (fn [batch values]
+    (zipmap values (repeat (f batch)))))
 
 (defn wrap-schema [schema fetchers & {:keys [execute-batches]
                                       :or {execute-batches execute-batches-sequentially}}]
@@ -265,12 +256,12 @@
                                (cons :Query)
                                (map (juxt identity #(into #{%} (type->parents %))))
                                (into {}))
-        type->field->fetcher (reduce-kv
-                               (fn [acc type parents]
-                                 (let [defaults (mapv acc parents)]
-                                   (update acc type #(apply merge (conj defaults %)))))
-                               (update fetchers :Query update-vals query-fetcher->field-fetcher)
-                               type->parents)]
+        fetchers (reduce-kv
+                   (fn [acc type parents]
+                     (let [defaults (mapv acc parents)]
+                       (update acc type #(apply merge (conj defaults %)))))
+                   fetchers
+                   type->parents)]
     (-> schema
         (update :queries
                 (fn [qs]
@@ -286,7 +277,7 @@
                                                                                    :field query-name
                                                                                    :args args
                                                                                    :selection (selection ctx))]
-                                                              (-> (fetch {k [node]} type->field->fetcher type->instance-of execute-batches)
+                                                              (-> (fetch {k [node]} fetchers type->instance-of execute-batches)
                                                                   (get k)
                                                                   (get node)))))))))
                        (into {}))))
@@ -300,7 +291,7 @@
                                        (fn [fs]
                                          (->> fs
                                               (map (fn [[field-name field-definition]]
-                                                     (require-fetcher type->field->fetcher object-name field-name)
+                                                     (require-fetcher fetchers object-name field-name)
                                                      [field-name (assoc field-definition
                                                                    :resolve (getter field-name))]))
                                               (into {}))))]))
