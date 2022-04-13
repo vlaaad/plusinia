@@ -238,14 +238,16 @@
 
 (defn wrap-schema [schema fetchers & {:keys [execute-batches]
                                       :or {execute-batches execute-batches-sequentially}}]
-  (let [type->parents (update-vals (group-by first (concat
-                                                     (for [[child {:keys [implements]}] (:objects schema)
-                                                           parent implements]
-                                                       [child parent])
-                                                     (for [[parent {:keys [members]}] (:unions schema)
-                                                           child members]
-                                                       [child parent])))
-                                   #(mapv second %))
+  (let [type->parents (->> (concat
+                             (for [[child {:keys [implements]}] (:objects schema)
+                                   parent implements]
+                               [child parent])
+                             (for [[parent {:keys [members]}] (:unions schema)
+                                   child members]
+                               [child parent]))
+                           (group-by first)
+                           (map (juxt key #(mapv second (val %))))
+                           (into {}))
         type->instance-of (->> schema
                                :objects
                                keys
