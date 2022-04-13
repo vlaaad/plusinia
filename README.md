@@ -25,11 +25,14 @@ Use git dependency:
 
 `io.github.vlaaad/plusinia {:git/tag "v1.18" :git/sha "5065817"}`
 
+If you are using this in production, please consider 
+[sponsoring my work](https://github.com/sponsors/vlaaad) on Plusinia.
+
 # Getting started
 
 Plusinia works by wrapping Lacinia schema before it's compiled. It sets **all** query and 
-object resolvers. It needs fetchers provided for every query and object field. The main
-difference between Lacinia resolver and Plusinia fetcher:
+object resolvers. Thus, it needs fetchers provided for every query and object field. The main
+difference between Lacinia resolver and Plusinia fetcher is:
 - Lacinia resolver transforms input value to result;
 - Plusinia fetcher transforms a set of input values to map from input value to result.
 
@@ -41,12 +44,14 @@ Let's start with creating a schema:
 
 (def schema
   (l.schema/compile
+    ;; Wrap before compiling:
     (p/wrap-schema
+      ;; Lacinia schema:
       '{:queries {:people {:type (list :Person)}}
         :objects {:Person {:fields {:name {:type String}
                                     :parents {:type (list :Person)}
                                     :children {:type (list :Person)}}}}}
-      ;; queries are defined using :Query type
+      ;; Plusinia fetchers. Queries are defined using :Query type
       {:Query {:people (fn [_ nils]
                          (zipmap nils (repeat ["Alice" "Adam" "Beth" "Bob"])))}
        :Person {:name (fn [_ people]
@@ -69,12 +74,10 @@ Let's start with creating a schema:
                                   people))}})))
 ```
 
-Now that we have a schema, we can query it:
+Now that we have a schema, we can query it as usual:
 
 ```clojure
-(l/execute 
-  schema 
-  "
+(l/execute schema "
   {
     people {
       name
@@ -86,9 +89,7 @@ Now that we have a schema, we can query it:
       }
     }
   }
-  " 
-  {}
-  {})
+  " {} {})
 => {:data {:people [{:name "Alice"
                      :children [{:name "Beth"} {:name "Bob"}]
                      :parents []}
@@ -102,7 +103,7 @@ Now that we have a schema, we can query it:
                      :children []
                      :parents [{:name "Alice"} {:name "Adam"}]}]}}
 ```
-Fetchers for this query will be executed (sequentially) exactly 5 times:
+Fetchers for this query will be executed (sequentially by default) exactly 5 times:
 ```graphql
 { 
   people {         # batch 1: load a list of people
@@ -117,24 +118,103 @@ Fetchers for this query will be executed (sequentially) exactly 5 times:
 }
 ```
 
-# How it works
+# Documentation
 
-Plusinia uses query introspection capabilities of Lacinia to perform all fetching 
-and batching in the root query resolver. Then, it transforms the results so resolvers of 
-other fields are simple map lookups. 
+Plusinia uses query introspection capabilities of Lacinia to perform all fetching
+and batching in the root query resolver. Then, it transforms the results in such a way
+that resolvers of other fields are simple map lookups.
 
+Even though Plusinia has terms like contexts and types, you shouldn't use any Lacinia code
+in Plusinia fetchers: no `tag-with-type`, no `with-context`, no `resolve-promise`.
 
+## Fetchers
 
+Fetchers load requested data. Fetchers receive 2 arguments:
+- batch key, that defaults to a merge of Plusinia context (`nil` by default) and field or 
+  query args;
+- a set of input values.
 
-# Tips and tricks
+Any function is a valid fetcher, but you can also use `p/make-field-fetcher` and `p/make-query-fetcher`
+to create fetcher maps that override how batch key is defined for the fetcher, and, in the case of
+`make-query-fetcher`, also define what context keys from Lacinia context are transferred to Plusinia
+context.
 
-TODO: 
-- query resolvers (nils...)
+For example, if you want to forward a value to fetcher from code that calls `l/execute`, you can
+use do it like that:
+```clojure
+(def schema
+  (l/compile
+    (p/wrap-schema 
+      ...
+      {:Query {:people (p/make-query-fetcher (fn [{:keys [auth-key]} nils] 
+                                               ...) 
+                                             :context-keys #{:auth-key})}})))
+
+(l/execute schema "..." {:auth-key ...auth-key-from-http-request})
+```
+
+By default, a fetcher should return a map from input value to result node (or a collection of 
+result nodes), but depending on parallelization strategy it can return anything that will 
+eventually resolve to the result map.
+
+## Result nodes
+
+Result node is a result value, that can optionally define GraphQL type and additional 
+context for fetched children of the result value. Any object is a valid node without any 
+explicit type or context.
+
+You can use `p/make-node` to define type and/or additional context, e.g.:
+```clojure
+[(p/make-node created-event :type :EntityCreated :context {:tx 1})
+ (p/make-node updated-event :type :EntityUpdated :context {:tx 2})]
+```
+
+## Query fetchers
+
+Query resolvers in Lacinia are somewhat special because they receive synthetic 
+`nil` as an input value. Plusinia fetchers are similarly special because they 
+receive a `#{nil}` is input values and have to return `{nil ...result-node-or-nodes}`.
+
+The boilerplate to execute query fetcher once and then return it for this set with `nil`
+looks like that:
+```clojure
+(fn some-query-fetcher [ctx+args nils]
+  (zipmap nils (repeat (execute-query! ctx+args))))
+```
+
+Plusinia could have used this boilerplate in its implementation to save you some typing, but
+unfortunately it can't do that due to a pluggable parallelization - fetchers can return 
+futures, or core.async chans, or anything else really! 
+
+## Parallelization
+
+When wrapping Lacinia schema with `p/wrap-schema`, you can provide a function that will
+execute a collection of fetch functions to call. It should return a collection of result 
+maps in the same order. Default implementation looks like that:
+```clojure
+(fn [fs]
+  (mapv (fn [f] (f)) fs))
+```
+You can make your fetchers return futures, and then make your parallelization function
+deref them, e.g.:
+```clojure
+(p/wrap-schema ...schema ...fetchers :execute-batches (fn [fs]
+                                                        (map #(deref (%)) fs)))
+```
+
+## Batches
+
+TODO:
 - batches: context keys, contexts, batch-fn.
   Plusinia batches resolvers by a permutation of:
-  - field fetcher fn;
-  - batch key (defaults to a merge of context and args, can be overridden);
-  - nesting depth of the query.
-- interfaces and unions
-- simple value transformers
-- parallelization (futures, thread pool)
+    - field fetcher fn;
+    - batch key (defaults to a merge of context and args, can be overridden);
+    - nesting depth of the query.
+
+## Interfaces and unions
+
+TODO
+
+## Simple value transformers
+
+TODO
