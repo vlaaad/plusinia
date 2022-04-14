@@ -19,7 +19,13 @@
   (get-context [_])
   (get-type [_]))
 
-(defn make-node [value & {:keys [context type]}]
+(defn make-node
+  "Construct result node
+
+  Optional kv-args:
+    :context   a context map that will be merged into context of nested fetchers
+    :type      node type, a keyword"
+  [value & {:keys [context type]}]
   (with-meta {::value value ::context context ::type type}
              {`get-value ::value `get-context ::context `get-type ::type}))
 
@@ -42,11 +48,37 @@
 (defn- get-batch-fn [fetcher]
   (if (map? fetcher) (:batch-fn fetcher) default-batch-fn))
 
-(defn make-query-fetcher [fn & {:keys [context-keys batch-fn]
-                                :or {batch-fn default-batch-fn}}]
+(defn make-query-fetcher
+  "Construct query fetcher
+
+  Query fetcher receives 2 args: batch key (defined by batch-fn) and input
+  values (#{nil}). It has to return a result map from input value to a node or a
+  collection of nodes. Depending on parallelization strategy, it can return
+  something that eventually resolves to the result map.
+
+  Optional kv-args:
+    :context-keys    a coll of keys to forward from Lacinia context to Plusinia
+                     context, defaults to nil
+    :batch-fn        a function of 3 args - Plusinia context, args and input
+                     value - to a batch key that will be used to group and
+                     invoke fetchers. Defaults to a merge of context and args"
+  [fn & {:keys [context-keys batch-fn]
+         :or {batch-fn default-batch-fn}}]
   {:fn fn :context-keys context-keys :batch-fn batch-fn})
 
-(defn make-field-fetcher [fn & {:keys [batch-fn]}]
+(defn make-field-fetcher
+  "Construct field fetcher
+
+  Field fetcher receives 2 args: batch key (defined by batch-fn) and a set of
+  input values. It has to return a result map from input value to a node or a
+  collection of nodes. Depending on parallelization strategy, it can return
+  something that eventually resolves to the result map.
+
+  Required kv-args:
+    :batch-fn        a function of 3 args - plusinia context, args and input
+                     value - to a batch key that will be used to group and
+                     invoke fetchers"
+  [fn & {:keys [batch-fn]}]
   {:pre [batch-fn]}
   {:fn fn :batch-fn batch-fn})
 
@@ -236,8 +268,22 @@
                       input-node->output-node-or-nodes))))))
       selector->input-nodes)))
 
-(defn wrap-schema [schema fetchers & {:keys [execute-batches]
-                                      :or {execute-batches execute-batches-sequentially}}]
+(defn wrap-schema
+  "Wrap Lacinia schema before it's compiled
+
+  This function sets all query and object resolvers on a schema using provided
+  fetchers - a map of object type (:Query for queries) to field to fetcher.
+
+  When wrapped schema is compiled, it will use fetchers to load the data.
+
+  Optional kv-args:
+    :execute-batches    function that performs execution of a collection of
+                        fetches, a parallelization strategy. Receives a
+                        collection of 0-arg fn that invoke fetchers and return
+                        fetcher results. It has to return a collection of result
+                        maps in the same order. Defaults to serial execution."
+  [schema fetchers & {:keys [execute-batches]
+                      :or {execute-batches execute-batches-sequentially}}]
   (let [type->parents (->> (concat
                              (for [[child {:keys [implements]}] (:objects schema)
                                    parent implements]

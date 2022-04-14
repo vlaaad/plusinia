@@ -25,9 +25,6 @@ Use git dependency:
 
 `io.github.vlaaad/plusinia {:git/tag "v1.18" :git/sha "5065817"}`
 
-If you are using this in production, please consider 
-[sponsoring my work](https://github.com/sponsors/vlaaad) on Plusinia.
-
 # Getting started
 
 Plusinia works by wrapping Lacinia schema before it's compiled. It sets **all** query and 
@@ -140,7 +137,7 @@ to create fetcher maps that override how batch key is defined for the fetcher, a
 context.
 
 For example, if you want to forward a value to fetcher from code that calls `l/execute`, you can
-use do it like that:
+do it like that:
 ```clojure
 (def schema
   (l/compile
@@ -173,7 +170,7 @@ You can use `p/make-node` to define type and/or additional context, e.g.:
 
 Query resolvers in Lacinia are somewhat special because they receive synthetic 
 `nil` as an input value. Plusinia fetchers are similarly special because they 
-receive a `#{nil}` is input values and have to return `{nil ...result-node-or-nodes}`.
+receive a `#{nil}` as input values and have to return `{nil ...result-node-or-nodes}`.
 
 The boilerplate to execute query fetcher once and then return it for this set with `nil`
 looks like that:
@@ -193,13 +190,13 @@ execute a collection of fetch functions to call. It should return a collection o
 maps in the same order. Default implementation looks like that:
 ```clojure
 (fn [fs]
-  (mapv (fn [f] (f)) fs))
+  (mapv #(%) fs))
 ```
 You can make your fetchers return futures, and then make your parallelization function
 deref them, e.g.:
 ```clojure
 (p/wrap-schema ...schema ...fetchers :execute-batches (fn [fs]
-                                                        (map #(deref (%)) fs)))
+                                                        (mapv deref (mapv #(%) fs))))
 ```
 
 ## Batching
@@ -245,9 +242,11 @@ between concrete types. Overriding is supported. Example:
                                            :updatedAt {:type String}}}}}
       {:Query {:changes (fn [_ nils]
                           ;; Queries of abstract types have to return explicitly typed nodes: 
-                          (zipmap nils (repeat [(p/make-node {:id 1 :createdAt "2022-04-14"} :type :EntityCreated)
-                                                (p/make-node {:id 1 :updatedAt "2022-04-15"} :type :EntityUpdated)
-                                                (p/make-node {:id 2 :createdAt "2022-04-16"} :type :EntityCreated)])))}
+                          (zipmap 
+                            nils 
+                            (repeat [(p/make-node {:id 1 :createdAt "2022-04-14"} :type :EntityCreated)
+                                     (p/make-node {:id 1 :updatedAt "2022-04-15"} :type :EntityUpdated)
+                                     (p/make-node {:id 2 :createdAt "2022-04-16"} :type :EntityCreated)])))}
        ;; Fetcher of abstract type:
        :Event {:id (transform-value-fetcher :id)}
        ;; Fetchers of concrete types:
@@ -277,5 +276,7 @@ between concrete types. Overriding is supported. Example:
 
 # Closing note
 
+That's all, folks!
+
 If you are using this in production, please consider
-[sponsoring my work](https://github.com/sponsors/vlaaad) on Plusinia :)
+[sponsoring my work](https://github.com/sponsors/vlaaad) on Plusinia.
