@@ -14,7 +14,7 @@ This problem can be solved with data loader library like
 [Superlifter](https://github.com/oliyh/superlifter). Superlifter can batch data loading 
 requests across all executing queries by using a combination of time windows and batch sizes.
 This results in a good overall performance at the expense of slightly increased query 
-execution times due to time windows where execution engine waits for batch to fill.
+execution times due to time windows where execution engine waits for a batch to fill.
 
 Plusinia provides an alternative solution for a use case where individual query execution 
 time is more important than overall server performance.
@@ -115,6 +115,8 @@ Fetchers for this query will be executed (sequentially by default) exactly 5 tim
 }
 ```
 
+You are good to go! 
+
 # Documentation
 
 Plusinia uses query introspection capabilities of Lacinia to perform all fetching
@@ -197,6 +199,15 @@ deref them, e.g.:
 ```clojure
 (p/wrap-schema ...schema ...fetchers :execute-batches (fn [fs]
                                                         (mapv deref (mapv #(%) fs))))
+```
+Or you can make your fetchers return result maps and invoke them in a thread pool:
+```clojure
+(import '[java.util.concurrent Executors ExecutorService])
+
+(def ^ExecutorService pool
+  (Executors/newFixedThreadPool 32))
+
+(p/wrap-schema ...schema ...fetchers :execute-batches #(mapv deref (.invokeAll pool %)))
 ```
 
 ## Batching
