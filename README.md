@@ -23,7 +23,7 @@ time is more important than overall server performance.
 
 Use git dependency:
 
-`io.github.vlaaad/plusinia {:git/tag "v1.18" :git/sha "5065817"}`
+`io.github.vlaaad/plusinia {:git/tag "v1.23" :git/sha "24e34cd"}`
 
 # Getting started
 
