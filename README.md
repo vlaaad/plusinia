@@ -202,19 +202,80 @@ deref them, e.g.:
                                                         (map #(deref (%)) fs)))
 ```
 
-## Batches
+## Batching
 
-TODO:
-- batches: context keys, contexts, batch-fn.
-  Plusinia batches resolvers by a permutation of:
-    - field fetcher fn;
-    - batch key (defaults to a merge of context and args, can be overridden);
-    - nesting depth of the query.
+Plusinia batches calls to fetchers on:
+- field fetcher function;
+- batch key (defaults to a merge of context and args);
+- nesting depth of the query.
+
+1st arg to fetcher function is a batch key. By default, this is a merge of Plusinia
+context (that defaults to `nil`) and field args. You can override the batch key on
+per-field basis by providing a custom batch function, e.g.:
+```clojure
+{:Shape {:area (p/make-field-fetcher (fn [shape-type shapes]
+                                       (case shape-type 
+                                         ...))
+                                     :batch-fn (fn [_ctx _args value]
+                                                 (:type value)))}}
+```
 
 ## Interfaces and unions
 
-TODO
+Plusinia supports interfaces and unions. It also allows specifying fetchers on the 
+abstract type - both unions and interfaces. In this case, fetchers will be shared
+between concrete types. Overriding is supported. Example:
+```clojure
 
-## Simple value transformers
+;; You'll probably need this in your project for simple "getter" fetchers :)
+(defn- transform-value-fetcher [f]
+  (fn [_ xs]
+    (into {} (map (juxt identity f)) xs)))
 
-TODO
+(def schema
+  (l.schema/compile
+    (p/wrap-schema
+      '{:queries {:changes {:type (list :Event)}}
+        :interfaces {:Event {:fields {:id {:type String}}}}
+        :objects {:EntityCreated {:implements [:Event]
+                                  :fields {:id {:type String}
+                                           :createdAt {:type String}}}
+                  :EntityUpdated {:implements [:Event]
+                                  :fields {:id {:type String}
+                                           :updatedAt {:type String}}}}}
+      {:Query {:changes (fn [_ nils]
+                          ;; Queries of abstract types have to return explicitly typed nodes: 
+                          (zipmap nils (repeat [(p/make-node {:id 1 :createdAt "2022-04-14"} :type :EntityCreated)
+                                                (p/make-node {:id 1 :updatedAt "2022-04-15"} :type :EntityUpdated)
+                                                (p/make-node {:id 2 :createdAt "2022-04-16"} :type :EntityCreated)])))}
+       ;; Fetcher of abstract type:
+       :Event {:id (transform-value-fetcher :id)}
+       ;; Fetchers of concrete types:
+       :EntityCreated {:createdAt (transform-value-fetcher :createdAt)}
+       :EntityUpdated {:updatedAt (transform-value-fetcher :updatedAt)}})))
+
+(l/execute schema "
+  {
+    changes {
+      event: __typename
+      id
+      ... on EntityCreated {
+        createdAt
+      }
+    }
+  }
+  " {} {})
+=> {:data {:changes [{:event :EntityCreated
+                      :id "1"
+                      :createdAt "2022-04-14"}
+                     {:event :EntityUpdated
+                      :id "1"}
+                     {:event :EntityCreated
+                      :id "2"
+                      :createdAt "2022-04-16"}]}}
+```
+
+# Closing note
+
+If you are using this in production, please consider
+[sponsoring my work](https://github.com/sponsors/vlaaad) on Plusinia :)

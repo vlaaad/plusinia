@@ -405,3 +405,14 @@
              (l/execute s "{concepts {
                                 related {id}
                                 broader {id}}}" {} {}))))))
+
+(comment
+  (require '[clojure.java.shell :refer [sh]]
+           '[clojure.string :as str])
+
+  (println
+    (let [v (str "v1." (str/trim-newline (:out (sh "git" "rev-list" "--count" "HEAD"))))
+          _ (sh "git" "tag" v)
+          sha (str/trim-newline (:out (sh "git" "rev-parse" "-q" "--verify" (str "refs/tags/" v) "--short=7")))]
+      (sh "git" "push" "origin" v)
+      (format "io.github.vlaaad/plusinia {:git/tag \"%s\" :git/sha \"%s\"}" v sha))))
